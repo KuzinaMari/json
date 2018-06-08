@@ -1,0 +1,5 @@
+*.o
+json
+*.swp
+input1.json
+input2.json
