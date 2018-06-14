@@ -3,21 +3,62 @@
 #include <stdlib.h>
 #include <string.h>
 #include "json.h"
-#include "json_print.h"
 
-int main(){
+struct State{
+	char ch;
+	FILE *input_file;
+	char name[STRMAX];
+	char previous[STRMAX];
+	char key[STRMAX];
+	char token[STRMAX];
+	struct Node *current;
+	struct Node *parent;
+	struct Node *root;
+	char last_key[STRMAX];
+	int token_length;
+	bool escape;
+};
 
+void print_node( char indent[STRMAX], struct Node *node );
+void print_self_node( struct Node *node );
+
+void print_input( struct State *machine );
+int process( struct State *machine );
+int process_char( struct State *machine );
+
+typedef void (*StateHandler)(struct State *);
+typedef char String[STRMAX];
+typedef struct State *Machine;
+typedef struct Node *NodePtr;
+
+void init_state( struct State *machine, FILE *input_file );
+
+// int main(){
+
+// 	struct State *machine;
+// 	machine =(struct State *) malloc (sizeof(struct State));
+
+// 	print_input( machine );
+
+// 	printf("\n\n");
+
+// 	init_state( machine, fopen("input.json", "r") );
+// 	process( machine );
+// 	end_state( machine );
+
+// 	return 0;
+// }
+
+int build_dom( struct Node* *root, FILE *input_file ){
 	struct State *machine;
 	machine =(struct State *) malloc (sizeof(struct State));
-
-	print_input( machine );
-
-	printf("\n\n");
-
-	init_state( machine );
-	process( machine );
-	end_state( machine );
-
+	init_state( machine, input_file );
+	if( process( machine ) ){
+		free( machine );
+		return 1;
+	}
+	*root =machine->root;
+	free( machine );
 	return 0;
 }
 
@@ -31,8 +72,9 @@ void free_node( struct Node *node ){
 	free( node );
 }
 
-void init_state( struct State *machine ){
-	machine->input_file = fopen("input.json", "r"); // read mode
+void init_state( struct State *machine, FILE *input_file ){
+	machine->root =0;
+	machine->input_file = input_file; // read mode
 
 	strncpy( machine->name, "", STRMAX );
 	strncpy( machine->key, "", STRMAX );
@@ -45,20 +87,12 @@ void init_state( struct State *machine ){
 	machine->escape =false;
 }
 
-void end_state( struct State *machine ){
-	char indent[STRMAX] ="";
-	print_node( indent, machine->root );
- 
-	free_node( machine->root );
-	fclose(machine->input_file);
-	free( machine );
-}
-
-void process( struct State *machine ){
+int process( struct State *machine ){
 	while((machine->ch = fgetc(machine->input_file)) != EOF){
 		//printf("%c\n", ch);
-		process_char( machine );
+		if( process_char( machine ) ) return 1;
 	}
+	return 0;
 }
 
 bool check_state( Machine machine, StringPtr state ){
@@ -87,9 +121,16 @@ void empty_token( Machine machine ){
 	machine->token_length =-1; }
 
 
-void new_node( Machine machine, StringPtr type ){
+int new_node( Machine machine, StringPtr type ){
+	if( machine->parent !=0 ){
+		if( machine->parent->children_count >= MAXCHILDREN ){
+			return 1;
+		}
+	}
 	machine->current=(NodePtr) malloc (sizeof(struct Node));
 	machine->current->children_count =0;
+	string_copy( machine->current->name, "" );
+	string_copy( machine->current->value, "" );
 	set_type( machine, type );
 	if( machine->parent !=0 ){
 		machine->parent->children[ machine->parent->children_count ] =machine->current;
@@ -101,14 +142,15 @@ void new_node( Machine machine, StringPtr type ){
 		machine->root = machine->current;
 	}
 	string_copy( machine->key, "" );
+	return 0;
 }
 
-void state_change_handler( Machine machine, StringPtr old_state, StringPtr new_state ){
+int state_change_handler( Machine machine, StringPtr old_state, StringPtr new_state ){
 	if( machine->parent != 0 ){
 		if( strings_equal( machine->parent->type, "list" )
 			&& is_token_state( old_state ) ){
 				string_copy( machine->key, "" );
-				new_node( machine, old_state ); }
+				if( new_node( machine, old_state ) ) return 1; }
 		if( strings_equal( machine->parent->type, "hash" )
 			&& strings_equal( old_state, "string" ) ){
 				string_copy( machine->key, machine->token ); }
@@ -126,60 +168,64 @@ void state_change_handler( Machine machine, StringPtr old_state, StringPtr new_s
 		machine->token[1] =0;
 		machine->token_length =1; }
 	if( strings_equal( old_state, "number" ) ){
-		process_char( machine ); } }
+		if( process_char( machine ) ) return 1; }
+	return 0; }
 
-void set_state( Machine machine, StringPtr state ){
+int set_state( Machine machine, StringPtr state ){
 	String old_state ="";
 	string_copy( old_state, machine->name );
 	if( !check_state( machine, state ) ){
 		string_copy( machine->name, state );
-		state_change_handler( machine, old_state, state ); } }
+		if( state_change_handler( machine, old_state, state ) ) return 1; }
+	return 0; }
 
-void append_char( Machine machine ){
+int append_char( Machine machine ){
+	if( machine->token_length >=STRMAX ) return 1;
 	if( machine->token_length <0 ) machine->token_length =0;
 	machine->token[ machine->token_length ] =machine->ch;
 	machine->token[ machine->token_length +1 ] =0;
-	machine->token_length++; }
+	machine->token_length++;
+	return 0; }
 
-void process_char( Machine machine ){
+int process_char( Machine machine ){
 	if( machine->ch == '\n' || machine->ch == ' ' )
-		return;
+		return 0;
 
 	if( check_state( machine, "string" ) ){
 		if( machine->escape ){
-			append_char( machine );
+			if( append_char( machine ) ) return 1;
 			machine->escape =false; }
 		else if( check_char( machine, '\\' ) ){
 			machine->escape =true; }
 		else if( check_char( machine, '"' ) ){
-			set_state( machine, "" ); }
+			if( set_state( machine, "" ) ) return 1; }
 		else{
-			append_char( machine ); } }
+			if( append_char( machine ) ) return 1; } }
 	else if( check_state( machine, "number" ) ){
 		if( is_number_char( machine ) ){
-			append_char( machine ); }
+			if( append_char( machine ) ) return 1; }
 		else{
-			set_state( machine, "" ); } }
+			if( set_state( machine, "" ) ) return 1; } }
 	else{
 		if( check_char( machine, '{' ) || check_char( machine, '[' ) ){
 			String type ="hash";
 			if( check_char( machine, '[' ) ) string_copy( type, "list" );
 			if( machine->root ==0 ){
-				new_node( machine, type ); }
+				if( new_node( machine, type ) ) return 1; }
 			else{
 				if( strings_equal( machine->parent->type, "list" ) ){
-					new_node( machine, type ); }
+					if( new_node( machine, type ) ) return 1; }
 				else{
 					set_type( machine, type );
 				 }
 				machine->parent =machine->current; }
 			machine->current =0; }
 		else if( check_char( machine, '"' ) ){
-			set_state( machine, "string" ); }
+			if( set_state( machine, "string" ) ) return 1; }
 		else if( is_number_char( machine ) ){
-			set_state( machine, "number" ); }
+			if( set_state( machine, "number" ) ) return 1; }
 		else if( check_char( machine, ':' ) ){
-			new_node( machine, "" ); }
+			if( new_node( machine, "" ) ) return 1; }
 		else if( check_char( machine, ',' ) ){
 			machine->current =0;
 			if( !strings_equal( machine->parent->type, "list" ) ){
@@ -192,4 +238,5 @@ void process_char( Machine machine ){
 			machine->current =0; }
 	 }
 	strncpy( machine->previous, machine->name, STRMAX );
+	return 0;
 }

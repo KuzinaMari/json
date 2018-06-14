@@ -1,6 +1,9 @@
 CC=gcc
 
-all: json
+all: json_print
+
+json_print: json.o json_print.o
+	$(CC) json.o json_print.o -o json_print
 
 json: json.o json_print.o
 	$(CC) json.o json_print.o -o json
@@ -15,4 +18,4 @@ clean:
 	rm -rf *.o json
 
 run: clean all
-	./json
+	./json_print ${ARGS}

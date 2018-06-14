@@ -4,6 +4,40 @@
 #include <string.h>
 #include "json.h"
 
+void print_node( char indent[STRMAX], struct Node *node );
+void print_input( FILE *input_file );
+
+int main(int argc, char *argv[]){
+
+	if( argc !=2 ){
+		printf("specify input file\n");
+		exit(1);
+	}
+	printf("input file: %s\n", argv[1]);
+
+	FILE *input_file;
+	if( ( input_file =fopen(argv[1], "r") ) ==0 ){
+		printf( "Cannot open file \n" );
+		exit( 1 );
+	}
+	print_input( input_file );
+	fclose( input_file );
+
+	input_file =fopen(argv[1], "r");
+	struct Node* root =0;
+	if( build_dom( &root, input_file ) ){
+		printf( "Incorrect data \n" );
+		fclose( input_file );
+		exit( 1 );
+	}
+	char indent[STRMAX] ="";
+	print_node( indent, root );
+	free_node( root );
+	fclose( input_file );
+
+	return 0;
+}
+
 void print_node( char indent[STRMAX], struct Node *node ){
 	printf( "%s%s", indent, node->type );
 	if( !strings_equal( node->name, "" ) ) printf( ", %s:", node->name );
@@ -18,10 +52,10 @@ void print_node( char indent[STRMAX], struct Node *node ){
 	}
 }
 
-void print_input( struct State *machine ){
-	machine->input_file = fopen("input.json", "r"); // read mode
-	while((machine->ch = fgetc(machine->input_file)) != EOF){
-			printf("%c", machine->ch);
+void print_input( FILE *input_file ){
+	char ch;
+	while((ch = fgetc(input_file)) != EOF){
+			printf("%c", ch);
 	}
-	fclose(machine->input_file);
+	printf("\n");
 }
